@@ -1,0 +1,21 @@
+{
+  "extends": [
+    "solhint:recommended"
+  ],
+  "rules": {
+    "compiler-version": "off",
+    "prettier/prettier": "error",
+    "avoid-sha3": "warn",
+    "avoid-suicide": "error",
+    "avoid-throw": "off",
+    "quotes": "off",
+    "max-states-count": "off",
+    "no-inline-assembly": "off",
+    "no-empty-blocks": "off",
+    "not-rely-on-time": "off",
+    "reason-string": "off"
+  },
+  "plugins": [
+    "prettier"
+  ]
+}
