@@ -109,6 +109,8 @@ contract ArtSteward {
         require(existingBid.price > deposits[owner], "Price too low");
         require(existingBid.price <= deposits[existingBid.purchaser], "Insufficient funds");
 
+        deposits[existingBid.purchaser] -= existingBid.price;
+
         uint256 ownerShare = (existingBid.price * 95) / 100;
         _deposit(owner, ownerShare);
 
