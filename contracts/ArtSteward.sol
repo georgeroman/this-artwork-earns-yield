@@ -7,116 +7,112 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 import "./interfaces/IwETH9.sol";
-import "./interfaces/IywETHV2.sol";
+import "./interfaces/IywETHv2.sol";
 
 contract ArtSteward {
     using Address for address payable;
     using Math for uint256;
 
-    struct Bid {
-        uint256 id;
-        address purchaser;
-        uint256 price;
-        uint256 eta;
-    }
-
     address public owner;
-    address public creator;
+    address public artist;
     IERC721 public art;
 
-    uint256 public totalDeposited;
-    mapping(address => uint256) public deposits;
+    uint256 public purchasePrice;
+    uint256 public sellPrice;
 
-    uint256 public bidCount;
-    mapping(uint256 => Bid) public bids;
+    mapping(address => uint256) public funds;
 
     IwETH9 private wETH9 = IwETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    IywETHV2 private ywETHV2 = IywETHV2(0xa9fE4601811213c340e850ea305481afF02f5b28);
+    IywETHv2 private ywETHv2 = IywETHv2(0xa9fE4601811213c340e850ea305481afF02f5b28);
 
-    event BidCreated(uint256 id, address purchaser, uint256 price, uint256 eta);
-
-    constructor(address _creator, address _art) {
-        creator = _creator;
+    constructor(address _art, address _artist) {
+        owner = address(this);
         art = IERC721(_art);
+        artist = _artist;
     }
 
     receive() external payable {}
 
-    function deposit() public payable {
-        _deposit(msg.sender, msg.value);
-    }
+    function buy(uint256 _newSellPrice) external payable {
+        uint256 deposit = _getDeposit(purchasePrice, sellPrice);
+        uint256 newDeposit = _getDeposit(sellPrice, _newSellPrice);
 
-    function _deposit(address _account, uint256 _amount) internal {
-        deposits[_account] += _amount;
-        totalDeposited += _amount;
+        require(msg.value == sellPrice + newDeposit, "Incorrect amount");
 
-        wETH9.deposit{value: _amount}();
-        wETH9.approve(address(ywETHV2), _amount);
+        collectYield();
 
-        ywETHV2.deposit(_amount);
-    }
-
-    function withdraw(uint256 _amount) public {
-        _withdraw(msg.sender, _amount, false);
-    }
-
-    function withdrawAll() public {
-        _withdraw(msg.sender, deposits[msg.sender], msg.sender == creator);
-    }
-
-    function _withdraw(
-        address _account,
-        uint256 _amount,
-        bool _withdrawYield
-    ) internal {
-        deposits[_account] -= _amount;
-        totalDeposited -= _amount;
-
-        uint256 shares = _amount / ywETHV2.pricePerShare();
-        uint256 redeemed = ywETHV2.withdraw(shares);
-        uint256 amountToWithdraw = redeemed.min(_amount);
-
-        if (_withdrawYield) {
-            uint256 depositShares = totalDeposited / ywETHV2.pricePerShare();
-            uint256 totalShares = ywETHV2.balanceOf(address(this));
-            amountToWithdraw += ywETHV2.withdraw(totalShares - depositShares);
+        funds[owner] += sellPrice;
+        if (deposit > 0) {
+            funds[owner] += _withdrawFromVault((deposit * 1e18) / ywETHv2.pricePerShare());
         }
 
-        wETH9.withdraw(amountToWithdraw);
-        payable(_account).sendValue(amountToWithdraw);
+        if (newDeposit > 0) {
+            _depositToVault(newDeposit);
+        }
+
+        owner = msg.sender;
+        purchasePrice = sellPrice;
+        sellPrice = _newSellPrice;
     }
 
-    function bid(uint256 _price) public returns (uint256) {
-        require(_price > deposits[owner], "Price too low");
-
-        Bid storage newBid = bids[bidCount];
-        newBid.id = bidCount;
-        newBid.purchaser = msg.sender;
-        newBid.price = _price;
-        newBid.eta = block.timestamp + 4 hours;
-        bidCount++;
-
-        emit BidCreated(newBid.id, newBid.purchaser, newBid.price, newBid.eta);
-        return newBid.id;
+    function setPrice(uint256 _newSellPrice) external payable {
+        if (_newSellPrice > sellPrice) {
+            _depositToVault(_newSellPrice - sellPrice);
+        } else if (_newSellPrice < sellPrice) {
+            uint256 totalShares = ywETHv2.balanceOf(address(this));
+            uint256 surplusShares = ((sellPrice - _newSellPrice) * 1e18) / ywETHv2.pricePerShare();
+            _withdrawFromVault(totalShares.min(surplusShares));
+        }
+        sellPrice = _newSellPrice;
     }
 
-    function buy(uint256 _bidId) public {
-        require(_bidId >= 0 && _bidId < bidCount, "Invalid bid");
+    function collectYield() public {
+        require(
+            msg.sender == address(this) || msg.sender == owner || msg.sender == artist,
+            "Unauthorized"
+        );
 
-        Bid storage existingBid = bids[_bidId];
-        require(existingBid.purchaser == msg.sender, "Unauthorized");
-        require(existingBid.eta <= block.timestamp, "Eta not met");
-        require(existingBid.price > deposits[owner], "Price too low");
-        require(existingBid.price <= deposits[existingBid.purchaser], "Insufficient funds");
+        uint256 deposit = _getDeposit(purchasePrice, sellPrice);
+        uint256 totalShares = ywETHv2.balanceOf(address(this));
+        uint256 depositShares = (deposit * 1e18) / ywETHv2.pricePerShare();
+        if (totalShares > depositShares) {
+            uint256 yieldShares = totalShares - depositShares;
+            funds[owner] += _withdrawFromVault(yieldShares / 2);
+            funds[artist] += _withdrawFromVault(yieldShares - yieldShares / 2);
+        }
+    }
 
-        deposits[existingBid.purchaser] -= existingBid.price;
+    function pullFunds() public {
+        uint256 fundsAvailable = funds[msg.sender];
+        funds[msg.sender] = 0;
 
-        uint256 ownerShare = (existingBid.price * 95) / 100;
-        _deposit(owner, ownerShare);
+        if (fundsAvailable > 0) {
+            payable(msg.sender).sendValue(fundsAvailable);
+        }
+    }
 
-        uint256 creatorShare = existingBid.price - ownerShare;
-        _deposit(creator, creatorShare);
+    function collectYieldAndPullFunds() external {
+        collectYield();
+        pullFunds();
+    }
 
-        owner = existingBid.purchaser;
+    function _getDeposit(uint256 _purchasePrice, uint256 _sellPrice)
+        internal
+        pure
+        returns (uint256)
+    {
+        return _sellPrice > _purchasePrice ? _sellPrice - _purchasePrice : 0;
+    }
+
+    function _depositToVault(uint256 _amount) internal returns (uint256) {
+        wETH9.deposit{value: _amount}();
+        wETH9.approve(address(ywETHv2), _amount);
+        return ywETHv2.deposit(_amount);
+    }
+
+    function _withdrawFromVault(uint256 _shares) internal returns (uint256) {
+        uint256 redeemed = ywETHv2.withdraw(_shares);
+        wETH9.withdraw(redeemed);
+        return redeemed;
     }
 }

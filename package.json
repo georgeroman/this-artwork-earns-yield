@@ -1,5 +1,5 @@
 {
-  "name": "liquid-nft",
+  "name": "this-artwork-earns-yield",
   "version": "0.0.1",
   "scripts": {
     "build": "npm run clean && npm run compile",

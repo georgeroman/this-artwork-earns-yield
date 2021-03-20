@@ -4,8 +4,8 @@ pragma solidity ^0.8.2;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-contract yETHV2 is ERC20 {
-    constructor() ERC20("yETH", "yETH") {}
+contract yETHv2 is ERC20 {
+    constructor() ERC20("yETHv2", "yETHv2") {}
 
     function deposit(uint256 _amount) external payable {
         _mint(msg.sender, _amount);
