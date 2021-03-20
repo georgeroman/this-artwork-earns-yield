@@ -21,6 +21,8 @@ contract ArtSteward is ReentrancyGuard {
 
     mapping(address => uint256) public funds;
 
+    uint256 private totalCollectedArtistYield;
+
     IwETH9 private wETH9 = IwETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IyvwETHv2 private yvwETHv2 = IyvwETHv2(0xa9fE4601811213c340e850ea305481afF02f5b28);
 
@@ -90,6 +92,17 @@ contract ArtSteward is ReentrancyGuard {
         }
     }
 
+    function artistYield() external view returns (uint256) {
+        uint256 totalShares = yvwETHv2.balanceOf(address(this));
+        uint256 depositShares = _getCurrentDepositShares();
+        if (totalShares > depositShares) {
+            uint256 ownerYieldShares = (totalShares - depositShares) / 2;
+            uint256 ownerYield = (ownerYieldShares * yvwETHv2.pricePerShare()) / 1e18;
+            return totalCollectedArtistYield + ownerYield;
+        }
+        return totalCollectedArtistYield;
+    }
+
     function _collectYield() internal {
         uint256 totalShares = yvwETHv2.balanceOf(address(this));
         uint256 depositShares = _getCurrentDepositShares();
@@ -98,15 +111,18 @@ contract ArtSteward is ReentrancyGuard {
             uint256 yieldShares = totalShares - depositShares;
             uint256 yield = _withdrawFromVault(yieldShares);
             // Split the yield between the owner and the artist
-            _sendFunds(owner, yield / 2);
-            _sendFunds(artist, yield - yield / 2);
+            uint256 ownerShare = yield / 2;
+            _sendFunds(owner, ownerShare);
+            uint256 artistShare = yield - ownerShare;
+            _sendFunds(artist, artistShare);
+            totalCollectedArtistYield += artistShare;
         }
     }
 
     function _sendFunds(address _recipient, uint256 _amount) internal {
         // Try sending the funds to the recipient, or else put them in an escrow
         // solhint-disable-next-line avoid-low-level-calls, avoid-call-value
-        (bool success, ) = _recipient.call{value: _amount}("");
+        (bool success, ) = _recipient.call{value: _amount, gas: 5000}("");
         if (!success) {
             funds[_recipient] += _amount;
         }
