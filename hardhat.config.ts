@@ -25,11 +25,12 @@ const config: HardhatUserConfig = {
     ],
   },
   networks: {
-    hardhat: {
-      forking: {
-        url: `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
-      },
-    },
+    hardhat: {},
+    // mainnetFork: {
+    //   forking: {
+    //     url: `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
+    //   },
+    // },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS ? true : false,

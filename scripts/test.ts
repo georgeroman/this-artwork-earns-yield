@@ -1,8 +1,10 @@
 import { BigNumber } from "@ethersproject/bignumber";
-import { providers } from "ethers";
 import { ethers, network } from "hardhat";
 
 import type { ArtSteward, ERC20, TAEY } from "../typechain";
+
+const YVWETHV2_ADDRESS = "0xa9fE4601811213c340e850ea305481afF02f5b28";
+const STRATEGIST_ADDRESS = "0xC3D6880fD95E06C816cB030fAc45b3ffe3651Cb0";
 
 // Retrieves the current timestamp on the blockchain
 export const now = async (): Promise<number> => {
@@ -14,14 +16,36 @@ export const now = async (): Promise<number> => {
 const mineBlock = async (timestamp: number) =>
   await ethers.provider.send("evm_increaseTime", [timestamp]);
 
+const harvest = async () => {
+  const strategist = ethers.provider.getSigner(STRATEGIST_ADDRESS);
+  await strategist
+    .sendTransaction({
+      to: "0xeE697232DF2226c9fB3F02a57062c4208f287851",
+      data: new ethers.utils.Interface(["function harvest()"]).encodeFunctionData("harvest"),
+    })
+    .then((tx) => tx.wait());
+};
+
+const getPricePerShare = async (): Promise<BigNumber> => {
+  const iface = new ethers.utils.Interface(["function pricePerShare() returns (uint256)"]);
+
+  let rawPricePerShare = await ethers.provider.call({
+    to: YVWETHV2_ADDRESS,
+    data: iface.encodeFunctionData("pricePerShare"),
+  });
+
+  return ethers.BigNumber.from(
+    iface.decodeFunctionResult("pricePerShare", rawPricePerShare).toString()
+  );
+};
+
 async function main() {
   const [account] = await ethers.getSigners();
 
   await network.provider.request({
     method: "hardhat_impersonateAccount",
-    params: ["0xC3D6880fD95E06C816cB030fAc45b3ffe3651Cb0"],
+    params: [STRATEGIST_ADDRESS],
   });
-  const strategist = ethers.provider.getSigner("0xC3D6880fD95E06C816cB030fAc45b3ffe3651Cb0");
 
   const taeyFactory = await ethers.getContractFactory("TAEY", account);
   const taey = (await taeyFactory.deploy().then((contract) => contract.deployed())) as TAEY;
@@ -31,67 +55,47 @@ async function main() {
     .deploy(taey.address, account.address)
     .then((contract) => contract.deployed())) as ArtSteward;
 
-  await strategist
-    .sendTransaction({
-      to: "0xeE697232DF2226c9fB3F02a57062c4208f287851",
-      data: new ethers.utils.Interface(["function harvest()"]).encodeFunctionData("harvest"),
-    })
-    .then((tx) => tx.wait());
-
-  const amountDeposited = ethers.BigNumber.from("10000000000000000000");
-
-  await artSteward
-    .connect(account)
-    .buy(amountDeposited, { value: amountDeposited })
-    .then((tx) => tx.wait());
-
-  const ywETHv2 = (await ethers.getContractFactory("ERC20", account)).attach(
-    "0xa9fE4601811213c340e850ea305481afF02f5b28"
+  const yvwETHv2 = (await ethers.getContractFactory("ERC20", account)).attach(
+    YVWETHV2_ADDRESS
   ) as ERC20;
 
-  const iface = new ethers.utils.Interface(["function pricePerShare() returns (uint256)"]);
-
-  let rawPricePerShare = await account.call({
-    to: ywETHv2.address,
-    data: iface.encodeFunctionData("pricePerShare"),
-  });
-
-  let pricePerShare = ethers.BigNumber.from(
-    iface.decodeFunctionResult("pricePerShare", rawPricePerShare).toString()
+  console.log(
+    (await yvwETHv2.balanceOf(artSteward.address))
+      .mul("1000000000000000000")
+      .div(await getPricePerShare())
+      .toString()
   );
-  console.log("old pricePerShare", pricePerShare.toString());
+
+  const newSellPrice = ethers.BigNumber.from("10000000000000000000");
+  await artSteward
+    .connect(account)
+    .buy(newSellPrice, { value: newSellPrice })
+    .then((tx) => tx.wait());
 
   console.log(
-    (await ywETHv2.balanceOf(artSteward.address))
+    (await yvwETHv2.balanceOf(artSteward.address))
       .mul("1000000000000000000")
-      .div(pricePerShare)
+      .div(await getPricePerShare())
       .toString()
   );
 
   await mineBlock((await now()) + 10 * 24 * 3600);
-
-  await strategist
-    .sendTransaction({
-      to: "0xeE697232DF2226c9fB3F02a57062c4208f287851",
-      data: new ethers.utils.Interface(["function harvest()"]).encodeFunctionData("harvest"),
-      gasLimit: 9500000,
-    })
-    .then((tx) => tx.wait());
-
-  rawPricePerShare = await account.call({
-    to: ywETHv2.address,
-    data: iface.encodeFunctionData("pricePerShare"),
-  });
-
-  pricePerShare = ethers.BigNumber.from(
-    iface.decodeFunctionResult("pricePerShare", rawPricePerShare).toString()
-  );
-  console.log("new pricePerShare", pricePerShare.toString());
+  await harvest();
 
   console.log(
-    (await ywETHv2.balanceOf(artSteward.address))
+    (await yvwETHv2.balanceOf(artSteward.address))
       .mul("1000000000000000000")
-      .div(pricePerShare)
+      .div(await getPricePerShare())
+      .toString()
+  );
+
+  await mineBlock((await now()) + 100 * 24 * 3600);
+  await harvest();
+
+  console.log(
+    (await yvwETHv2.balanceOf(artSteward.address))
+      .mul("1000000000000000000")
+      .div(await getPricePerShare())
       .toString()
   );
 }
