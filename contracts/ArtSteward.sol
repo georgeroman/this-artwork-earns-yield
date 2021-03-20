@@ -42,7 +42,7 @@ contract ArtSteward is ReentrancyGuard {
         require(msg.value == sellPrice + newDeposit, "Incorrect amount");
 
         // Collect any yield for the current owner and the artist
-        this.collectYield();
+        _collectYield();
 
         // After collecting the yield, the remaining shares denote the owner's deposit
         uint256 previousDepositShares = yvwETHv2.balanceOf(address(this));
@@ -77,11 +77,20 @@ contract ArtSteward is ReentrancyGuard {
     }
 
     function collectYield() public nonReentrant {
-        require(
-            msg.sender == address(this) || msg.sender == owner || msg.sender == artist,
-            "Unauthorized"
-        );
+        require(msg.sender == owner || msg.sender == artist, "Unauthorized");
+        _collectYield();
+    }
 
+    function pullFunds() public nonReentrant {
+        // Pull any escrowed funds
+        uint256 fundsAvailable = funds[msg.sender];
+        funds[msg.sender] = 0;
+        if (fundsAvailable > 0) {
+            _sendFunds(msg.sender, fundsAvailable);
+        }
+    }
+
+    function _collectYield() internal {
         uint256 totalShares = yvwETHv2.balanceOf(address(this));
         uint256 depositShares = _getCurrentDepositShares();
         if (totalShares > depositShares) {
@@ -94,21 +103,12 @@ contract ArtSteward is ReentrancyGuard {
         }
     }
 
-    function _sendFunds(address _recipient, uint256 _amount) internal nonReentrant {
+    function _sendFunds(address _recipient, uint256 _amount) internal {
         // Try sending the funds to the recipient, or else put them in an escrow
         // solhint-disable-next-line avoid-low-level-calls, avoid-call-value
         (bool success, ) = _recipient.call{value: _amount}("");
         if (!success) {
             funds[_recipient] += _amount;
-        }
-    }
-
-    function pullFunds() public nonReentrant {
-        // Pull any escrowed funds
-        uint256 fundsAvailable = funds[msg.sender];
-        funds[msg.sender] = 0;
-        if (fundsAvailable > 0) {
-            _sendFunds(msg.sender, fundsAvailable);
         }
     }
 
