@@ -14,5 +14,5 @@ export const deployContract = async <T extends Contract>(
 
 export const bn = (n: BigNumberish): BigNumber => BigNumber.from(n);
 
-export const expandTo18Decimals = (n: BigNumberish): BigNumber =>
+export const e18 = (n: BigNumberish): BigNumber =>
   ethers.BigNumber.from(n).mul(ethers.BigNumber.from(10).pow(18));
