@@ -99,8 +99,13 @@ describe("ArtSteward", () => {
 
     it("set a lower price", async () => {
       await artSteward.connect(alice).buy(e18(2), { value: e18(2) });
-      await artSteward.connect(alice).setPrice(e18(1));
+
+      const initialAliceBalance = await alice.getBalance();
+      const tx = await artSteward.connect(alice).setPrice(e18(1));
+      const ethUsedAsGas = tx.gasPrice.mul((await tx.wait()).gasUsed);
+
       expect(await yvwETHv2.balanceOf(artSteward.address)).to.eq(await ethToShares(e18(1)));
+      expect(await alice.getBalance()).to.eq(initialAliceBalance.sub(ethUsedAsGas).add(e18(1)));
     });
   });
 
@@ -153,6 +158,29 @@ describe("ArtSteward", () => {
 
       expect(await alice.getBalance()).to.eq(ownerBalance1.sub(ethUsedAsGas));
       expect(await artist.getBalance()).to.eq(artistBalance1);
+    });
+
+    it("yield is collected on buy", async () => {
+      await artSteward.connect(alice).buy(e18(10), { value: e18(10) });
+
+      const initialAliceBalance = await alice.getBalance();
+      const initialArtistBalance = await artist.getBalance();
+      await yvwETHv2.connect(deployer).setPricePerShare(e18(101).div(100));
+      const _yield = await artSteward.getCurrentYield();
+      const ownerShare = _yield.div(2);
+      const artistShare = _yield.sub(ownerShare);
+
+      await artSteward.connect(bob).buy(e18(12), { value: e18(12) });
+
+      const ownerSellShare = e18(10).mul(95).div(100);
+      const artistSellShare = e18(10).sub(ownerSellShare);
+
+      // expect(await alice.getBalance()).to.eq(
+      //   initialAliceBalance.add(ownerShare).add(e18(10)).add(ownerSellShare)
+      // );
+      expect(await artist.getBalance()).to.eq(
+        initialArtistBalance.add(artistShare).add(artistSellShare)
+      );
     });
   });
 });
