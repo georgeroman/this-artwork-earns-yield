@@ -31,6 +31,15 @@ const config: HardhatUserConfig = {
     //     url: `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
     //   },
     // },
+    local: {
+      url: "http://localhost:8545",
+    },
+    goerli: {
+      url: `https://goerli.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
+      accounts: {
+        mnemonic: "hip mention twenty random stairs nasty pistol essay giraffe season shuffle ring",
+      },
+    },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS ? true : false,

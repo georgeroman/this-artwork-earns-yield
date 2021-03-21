@@ -12,6 +12,10 @@ import "./interfaces/IyvwETHv2.sol";
 contract ArtSteward is ReentrancyGuard {
     using Math for uint256;
 
+    /**************************************
+                     FIELDS
+    ***************************************/
+
     IERC721 public art;
     address public owner;
     address public artist;
@@ -25,6 +29,23 @@ contract ArtSteward is ReentrancyGuard {
     IwETH9 private wETH9 = IwETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IyvwETHv2 private yvwETHv2 = IyvwETHv2(0xa9fE4601811213c340e850ea305481afF02f5b28);
 
+    /**************************************
+                     EVENTS
+    ***************************************/
+
+    event Bought(
+        address indexed previousOwner,
+        address indexed newOwner,
+        uint256 purchasePrice,
+        uint256 newSellPrice
+    );
+    event PriceChanged(address indexed currentOwner, uint256 oldPrice, uint256 newPrice);
+    event YieldCollected(address indexed currentOwner, uint256 ownerYield, uint256 artistYield);
+
+    /**************************************
+                  CONSTRUCTOR
+    ***************************************/
+
     constructor(address _artist) {
         art = new TAEY();
         owner = _artist;
@@ -35,8 +56,11 @@ contract ArtSteward is ReentrancyGuard {
         // Needed for unwrapping wETH
     }
 
+    /***************************************
+                     ACTIONS
+    ****************************************/
+
     function buy(uint256 _newSellPrice) external payable nonReentrant {
-        // The deposit represents the difference between the purchase and sell prices
         uint256 newDeposit = _getDeposit(sellPrice, _newSellPrice);
 
         // Make sure the buyer has the needed funds
@@ -45,9 +69,9 @@ contract ArtSteward is ReentrancyGuard {
         // Collect any yield for the current owner and the artist
         _collectYield();
 
-        // After collecting the yield, the remaining shares denote the owner's deposit
-        uint256 previousDepositShares = yvwETHv2.balanceOf(address(this));
-        funds[owner] += _withdrawFromVault(previousDepositShares);
+        // After collecting the yield, the remaining shares denote the current owner's deposit
+        uint256 currentDepositShares = yvwETHv2.balanceOf(address(this));
+        funds[owner] += _withdrawFromVault(currentDepositShares);
 
         // Share the sell price between the owner and the artist
         uint256 ownerShare = (sellPrice * 95) / 100;
@@ -63,6 +87,8 @@ contract ArtSteward is ReentrancyGuard {
         _sendFunds(owner);
         _sendFunds(artist);
 
+        emit Bought(owner, msg.sender, sellPrice, _newSellPrice);
+
         // Adjust ownership parameters
         owner = msg.sender;
         purchasePrice = sellPrice;
@@ -70,6 +96,8 @@ contract ArtSteward is ReentrancyGuard {
     }
 
     function setPrice(uint256 _newSellPrice) external payable nonReentrant {
+        require(msg.sender == owner, "Unauthorized");
+
         if (_newSellPrice > sellPrice) {
             // If the new sell price is higher than the old one, more deposit is needed
             uint256 neededDeposit = _newSellPrice - sellPrice;
@@ -81,6 +109,8 @@ contract ArtSteward is ReentrancyGuard {
             uint256 surplusShares = ((sellPrice - _newSellPrice) * 1e18) / yvwETHv2.pricePerShare();
             funds[owner] += _withdrawFromVault(depositShares.min(surplusShares));
         }
+
+        emit PriceChanged(owner, sellPrice, _newSellPrice);
         sellPrice = _newSellPrice;
 
         // Push any outstanding funds
@@ -100,6 +130,10 @@ contract ArtSteward is ReentrancyGuard {
         _sendFunds(msg.sender);
     }
 
+    /***************************************
+                      VIEWS
+    ****************************************/
+
     function getCurrentYield() external view returns (uint256) {
         uint256 totalShares = yvwETHv2.balanceOf(address(this));
         uint256 depositShares = _getCurrentDepositShares();
@@ -111,6 +145,10 @@ contract ArtSteward is ReentrancyGuard {
         return 0;
     }
 
+    /***************************************
+                     HELPERS
+    ****************************************/
+
     function _collectYield() internal {
         uint256 totalShares = yvwETHv2.balanceOf(address(this));
         uint256 depositShares = _getCurrentDepositShares();
@@ -118,6 +156,7 @@ contract ArtSteward is ReentrancyGuard {
             // Any shares not belonging to the deposit correspond to yield
             uint256 yieldShares = totalShares - depositShares;
             uint256 yield = _withdrawFromVault(yieldShares);
+
             // Split the yield between the owner and the artist
             uint256 ownerShare = yield / 2;
             funds[owner] += ownerShare;
@@ -125,6 +164,8 @@ contract ArtSteward is ReentrancyGuard {
             uint256 artistShare = yield - ownerShare;
             funds[artist] += artistShare;
             totalEarnings[artist] += artistShare;
+
+            emit YieldCollected(owner, ownerShare, artistShare);
         }
     }
 
@@ -135,7 +176,7 @@ contract ArtSteward is ReentrancyGuard {
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = _recipient.call{value: fundsAvailable, gas: 6400}("");
         if (!success) {
-            funds[_recipient] += fundsAvailable;
+            funds[_recipient] = fundsAvailable;
         }
     }
 
@@ -144,13 +185,16 @@ contract ArtSteward is ReentrancyGuard {
         pure
         returns (uint256)
     {
+        // The deposit represents the difference between the purchase and sell price
         return _sellPrice > _purchasePrice ? _sellPrice - _purchasePrice : 0;
     }
 
     function _getCurrentDepositShares() internal view returns (uint256) {
         uint256 deposit = _getDeposit(purchasePrice, sellPrice);
-        uint256 depositShares = (deposit * 1e18) / yvwETHv2.pricePerShare();
+
         uint256 totalShares = yvwETHv2.balanceOf(address(this));
+        uint256 depositShares = (deposit * 1e18) / yvwETHv2.pricePerShare();
+
         // Handle the case of a negative yield when we would lose money on the deposit
         return totalShares.min(depositShares);
     }
@@ -167,7 +211,11 @@ contract ArtSteward is ReentrancyGuard {
         return redeemed;
     }
 
-    // Only for testing purposes, remove on deployment!
+    /***************************************
+                     TESTING
+    ****************************************/
+
+    // Only for testing purposes, make sure to remove on deployment!
 
     function setWETH9(address _wETH9) external {
         wETH9 = IwETH9(_wETH9);

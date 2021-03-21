@@ -10,6 +10,6 @@ contract TAEY is ERC721 {
     }
 
     function _baseURI() internal pure override returns (string memory) {
-        return "https://thisartworkearnsyield.com/";
+        return "https://thisartworkearnsyield.com/api/";
     }
 }

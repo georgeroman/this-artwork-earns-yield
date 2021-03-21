@@ -13,7 +13,8 @@
     "no-inline-assembly": "off",
     "no-empty-blocks": "off",
     "not-rely-on-time": "off",
-    "reason-string": "off"
+    "reason-string": "off",
+    "func-visibility": "off"
   },
   "plugins": [
     "prettier"
