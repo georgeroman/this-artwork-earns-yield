@@ -108,9 +108,7 @@ describe("ArtSteward", () => {
     it("positive yield", async () => {
       await artSteward.connect(alice).buy(e18(10), { value: e18(10) });
 
-      const sharesValue1 = await sharesToEth(await yvwETHv2.balanceOf(artSteward.address));
       await yvwETHv2.connect(deployer).setPricePerShare(e18(101).div(100));
-      const sharesValue2 = await sharesToEth(await yvwETHv2.balanceOf(artSteward.address));
 
       const depositShares = e18(10)
         .mul(e18(1))
@@ -129,6 +127,32 @@ describe("ArtSteward", () => {
 
       expect(await alice.getBalance()).to.eq(ownerBalance1.sub(ethUsedAsGas).add(_yield.div(2)));
       expect(await artist.getBalance()).to.eq(artistBalance1.add(_yield.sub(_yield.div(2))));
+    });
+
+    it("negative yield", async () => {
+      await artSteward.connect(alice).buy(e18(10), { value: e18(10) });
+
+      const sharesValue1 = await sharesToEth(await yvwETHv2.balanceOf(artSteward.address));
+      await yvwETHv2.connect(deployer).setPricePerShare(e18(99).div(100));
+      const sharesValue2 = await sharesToEth(await yvwETHv2.balanceOf(artSteward.address));
+
+      const depositShares = e18(10)
+        .mul(e18(1))
+        .div(await yvwETHv2.pricePerShare());
+      const totalShares = await yvwETHv2.balanceOf(artSteward.address);
+
+      // On a negative yield, the yEarn shares are worth less than the deposit
+      expect(depositShares.gt(totalShares)).to.be.true;
+
+      const ownerBalance1 = await alice.getBalance();
+      const artistBalance1 = await artist.getBalance();
+
+      // Consequently, no yield is generated as all shares would be used to cover the deposit
+      const tx = await artSteward.connect(alice).collectYield();
+      const ethUsedAsGas = tx.gasPrice.mul((await tx.wait()).gasUsed);
+
+      expect(await alice.getBalance()).to.eq(ownerBalance1.sub(ethUsedAsGas));
+      expect(await artist.getBalance()).to.eq(artistBalance1);
     });
   });
 });
