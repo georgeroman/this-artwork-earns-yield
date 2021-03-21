@@ -40,6 +40,10 @@ const config: HardhatUserConfig = {
         mnemonic: "hip mention twenty random stairs nasty pistol essay giraffe season shuffle ring",
       },
     },
+    mainnet: {
+      url: `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
+      accounts: [`${process.env.DEPLOYER_PRIVATE_KEY}`],
+    },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS ? true : false,
