@@ -174,7 +174,7 @@ contract ArtSteward is ReentrancyGuard {
         uint256 fundsAvailable = funds[_recipient];
         funds[_recipient] = 0;
         // solhint-disable-next-line avoid-low-level-calls
-        (bool success, ) = _recipient.call{value: fundsAvailable, gas: 6400}("");
+        (bool success, ) = _recipient.call{value: fundsAvailable, gas: 10000}("");
         if (!success) {
             funds[_recipient] = fundsAvailable;
         }
@@ -217,11 +217,11 @@ contract ArtSteward is ReentrancyGuard {
 
     // Only for testing purposes, make sure to remove on deployment!
 
-    function setWETH9(address _wETH9) external {
-        wETH9 = IwETH9(_wETH9);
-    }
+    // function setWETH9(address _wETH9) external {
+    //     wETH9 = IwETH9(_wETH9);
+    // }
 
-    function setYvwETHv2(address _yvwETHv2) external {
-        yvwETHv2 = IyvwETHv2(_yvwETHv2);
-    }
+    // function setYvwETHv2(address _yvwETHv2) external {
+    //     yvwETHv2 = IyvwETHv2(_yvwETHv2);
+    // }
 }
