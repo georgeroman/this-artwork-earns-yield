@@ -63,19 +63,30 @@ describe("ArtSteward", () => {
     it("buy from previous owner", async () => {
       await artSteward.connect(alice).buy(e18(1), { value: e18(1) });
 
-      const initialSellerBalance = await alice.getBalance();
+      const ownerBalance1 = await alice.getBalance();
+      const artistBalance1 = await artist.getBalance();
+
       await artSteward.connect(bob).buy(e18(3), { value: e18(3) });
+
+      const ownerSellShare = e18(1).mul(95).div(100);
+      const artistSellShare = e18(1).sub(ownerSellShare);
+
       expect(await yvwETHv2.balanceOf(artSteward.address)).to.eq(await ethToShares(e18(2)));
-      expect(await alice.getBalance()).to.eq(initialSellerBalance.add(e18(2)));
+      expect(await alice.getBalance()).to.eq(ownerBalance1.add(e18(1)).add(ownerSellShare));
+      expect(await artist.getBalance()).to.eq(artistBalance1.add(artistSellShare));
     });
 
     it("buy and set a sell price lower than the purchase price", async () => {
       await artSteward.connect(alice).buy(e18(2), { value: e18(2) });
 
-      const initialSellerBalance = await alice.getBalance();
+      const ownerBalance1 = await alice.getBalance();
+
       await artSteward.connect(bob).buy(e18(0), { value: e18(2) });
+
+      const ownerSellShare = e18(2).mul(95).div(100);
+
       expect(await yvwETHv2.balanceOf(artSteward.address)).to.eq(bn(0));
-      expect(await alice.getBalance()).to.eq(initialSellerBalance.add(e18(4)));
+      expect(await alice.getBalance()).to.eq(ownerBalance1.add(e18(2)).add(ownerSellShare));
     });
   });
 
@@ -101,7 +112,23 @@ describe("ArtSteward", () => {
       await yvwETHv2.connect(deployer).setPricePerShare(e18(101).div(100));
       const sharesValue2 = await sharesToEth(await yvwETHv2.balanceOf(artSteward.address));
 
-      console.log(sharesValue2.sub(sharesValue1).toString());
+      const depositShares = e18(10)
+        .mul(e18(1))
+        .div(await yvwETHv2.pricePerShare());
+      const totalShares = await yvwETHv2.balanceOf(artSteward.address);
+      const _yield = totalShares
+        .sub(depositShares)
+        .mul(await yvwETHv2.pricePerShare())
+        .div(e18(1));
+
+      const ownerBalance1 = await alice.getBalance();
+      const artistBalance1 = await artist.getBalance();
+
+      const tx = await artSteward.connect(alice).collectYield();
+      const ethUsedAsGas = tx.gasPrice.mul((await tx.wait()).gasUsed);
+
+      expect(await alice.getBalance()).to.eq(ownerBalance1.sub(ethUsedAsGas).add(_yield.div(2)));
+      expect(await artist.getBalance()).to.eq(artistBalance1.add(_yield.sub(_yield.div(2))));
     });
   });
 });

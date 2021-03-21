@@ -20,8 +20,7 @@ contract ArtSteward is ReentrancyGuard {
     uint256 public sellPrice;
 
     mapping(address => uint256) public funds;
-
-    uint256 private totalCollectedArtistYield;
+    mapping(address => uint256) public totalEarnings;
 
     IwETH9 private wETH9 = IwETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IyvwETHv2 private yvwETHv2 = IyvwETHv2(0xa9fE4601811213c340e850ea305481afF02f5b28);
@@ -48,13 +47,21 @@ contract ArtSteward is ReentrancyGuard {
 
         // After collecting the yield, the remaining shares denote the owner's deposit
         uint256 previousDepositShares = yvwETHv2.balanceOf(address(this));
-        uint256 redeemed = _withdrawFromVault(previousDepositShares);
+        funds[owner] += _withdrawFromVault(previousDepositShares);
 
-        // Pay the current owner the sell price and deposit
-        _sendFunds(owner, sellPrice + redeemed);
+        // Share the sell price between the owner and the artist
+        uint256 ownerShare = (sellPrice * 95) / 100;
+        funds[owner] += ownerShare;
+        uint256 artistShare = sellPrice - ownerShare;
+        funds[artist] += artistShare;
+        totalEarnings[artist] += artistShare;
 
         // Deposit the new owner's deposit
         _depositToVault(newDeposit);
+
+        // Push any outstanding funds
+        _sendFunds(owner);
+        _sendFunds(artist);
 
         // Adjust ownership parameters
         owner = msg.sender;
@@ -65,42 +72,43 @@ contract ArtSteward is ReentrancyGuard {
     function setPrice(uint256 _newSellPrice) external payable nonReentrant {
         if (_newSellPrice > sellPrice) {
             // If the new sell price is higher than the old one, more deposit is needed
-            uint256 amountToDeposit = _newSellPrice - sellPrice;
-            require(msg.value == amountToDeposit, "Incorrect amount");
-            _depositToVault(amountToDeposit);
+            uint256 neededDeposit = _newSellPrice - sellPrice;
+            require(msg.value == neededDeposit, "Incorrect amount");
+            _depositToVault(neededDeposit);
         } else if (_newSellPrice < sellPrice) {
-            // Else, we need to return part of the deposit
+            // Else, we need to return part of the current deposit
             uint256 depositShares = _getCurrentDepositShares();
             uint256 surplusShares = ((sellPrice - _newSellPrice) * 1e18) / yvwETHv2.pricePerShare();
-            uint256 redeemed = _withdrawFromVault(depositShares.min(surplusShares));
-            _sendFunds(owner, redeemed);
+            funds[owner] += _withdrawFromVault(depositShares.min(surplusShares));
         }
         sellPrice = _newSellPrice;
+
+        // Push any outstanding funds
+        _sendFunds(owner);
     }
 
     function collectYield() public nonReentrant {
         require(msg.sender == owner || msg.sender == artist, "Unauthorized");
         _collectYield();
+
+        // Push any outstanding funds
+        _sendFunds(owner);
+        _sendFunds(artist);
     }
 
     function pullFunds() public nonReentrant {
-        // Pull any escrowed funds
-        uint256 fundsAvailable = funds[msg.sender];
-        funds[msg.sender] = 0;
-        if (fundsAvailable > 0) {
-            _sendFunds(msg.sender, fundsAvailable);
-        }
+        _sendFunds(msg.sender);
     }
 
-    function artistYield() external view returns (uint256) {
+    function getCurrentYield() external view returns (uint256) {
         uint256 totalShares = yvwETHv2.balanceOf(address(this));
         uint256 depositShares = _getCurrentDepositShares();
         if (totalShares > depositShares) {
-            uint256 ownerYieldShares = (totalShares - depositShares) / 2;
-            uint256 ownerYield = (ownerYieldShares * yvwETHv2.pricePerShare()) / 1e18;
-            return totalCollectedArtistYield + ownerYield;
+            uint256 yieldShares = totalShares - depositShares;
+            uint256 yield = (yieldShares * yvwETHv2.pricePerShare()) / 1e18;
+            return yield;
         }
-        return totalCollectedArtistYield;
+        return 0;
     }
 
     function _collectYield() internal {
@@ -112,19 +120,22 @@ contract ArtSteward is ReentrancyGuard {
             uint256 yield = _withdrawFromVault(yieldShares);
             // Split the yield between the owner and the artist
             uint256 ownerShare = yield / 2;
-            _sendFunds(owner, ownerShare);
+            funds[owner] += ownerShare;
+            totalEarnings[owner] += ownerShare;
             uint256 artistShare = yield - ownerShare;
-            _sendFunds(artist, artistShare);
-            totalCollectedArtistYield += artistShare;
+            funds[artist] += artistShare;
+            totalEarnings[artist] += artistShare;
         }
     }
 
-    function _sendFunds(address _recipient, uint256 _amount) internal {
+    function _sendFunds(address _recipient) internal {
         // Try sending the funds to the recipient, or else put them in an escrow
-        // solhint-disable-next-line avoid-low-level-calls, avoid-call-value
-        (bool success, ) = _recipient.call{value: _amount, gas: 5000}("");
+        uint256 fundsAvailable = funds[_recipient];
+        funds[_recipient] = 0;
+        // solhint-disable-next-line avoid-low-level-calls
+        (bool success, ) = _recipient.call{value: fundsAvailable, gas: 6400}("");
         if (!success) {
-            funds[_recipient] += _amount;
+            funds[_recipient] += fundsAvailable;
         }
     }
 
