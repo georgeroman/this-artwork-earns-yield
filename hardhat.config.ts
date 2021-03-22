@@ -4,6 +4,7 @@ dotEnvConfig();
 import { HardhatUserConfig } from "hardhat/types";
 
 import "@nomiclabs/hardhat-ethers";
+import "@nomiclabs/hardhat-etherscan";
 import "@nomiclabs/hardhat-waffle";
 import "hardhat-gas-reporter";
 import "hardhat-typechain";
@@ -47,6 +48,9 @@ const config: HardhatUserConfig = {
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS ? true : false,
+  },
+  etherscan: {
+    apiKey: `${process.env.ETHERSCAN_API_KEY}`,
   },
 };
 
